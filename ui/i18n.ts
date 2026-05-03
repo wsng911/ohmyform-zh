@@ -9,7 +9,7 @@ i18n
   .use(detector)
   .use(initReactI18next)
   .init({
-    fallbackLng: 'en',
+    fallbackLng: 'cn',
     resources,
     defaultNS: 'common',
     react: {

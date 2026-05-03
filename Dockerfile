@@ -1,73 +1,46 @@
-## Build UI
-FROM node:20-alpine as ui
+FROM node:20-alpine AS ui
 
-WORKDIR /usr/src/ui
+WORKDIR /app
 
-RUN apk --update --no-cache add curl bash g++ make libpng-dev
+RUN apk add --no-cache git bash g++ make libpng-dev && \
+    git config --global user.email "dev@example.com" && \
+    git config --global user.name "dev"
 
-# install node-prune (https://github.com/tj/node-prune)
-RUN curl -sf https://gobinaries.com/tj/node-prune | sh
-
-COPY ui/ .
-
+COPY ui/package.json ui/yarn.lock ./
 RUN yarn install --frozen-lockfile
+
+COPY ui/ ./
 RUN yarn build
 
-# remove development dependencies
-RUN npm prune --production
+FROM node:20-alpine AS api
 
-# run node prune
-# there is some problem running node prune that then prevents the frontend to load (just start with /form/1 and it will crash)
-#RUN /usr/local/bin/node-prune
+WORKDIR /app
 
-## Build API
-FROM node:20-alpine as api
-LABEL maintainer="OhMyForm <admin@ohmyform.com>"
+RUN apk add --no-cache git bash g++ make libpng-dev python3
 
-WORKDIR /usr/src/api
+COPY api/package*.json ./
+RUN npm install --production
 
-RUN apk --update --no-cache add curl bash g++ make libpng-dev python3
+COPY api/ ./
 
-# install node-prune (https://github.com/tj/node-prune)
-RUN curl -sf https://gobinaries.com/tj/node-prune | sh
-
-COPY api/ .
-
-RUN touch /usr/src/api/src/schema.gql && chown 9999:9999 /usr/src/api/src/schema.gql
-
-RUN yarn install --frozen-lockfile
-RUN yarn build
-
-# remove development dependencies
-RUN npm prune --production
-
-# run node prune
-RUN /usr/local/bin/node-prune
-
-## Production Image.
 FROM node:20-alpine
 
-RUN apk --update add supervisor nginx && rm -rf /var/cache/apk/*
+WORKDIR /app
 
-WORKDIR /usr/src
+RUN apk add --no-cache git && \
+    git config --global user.email "dev@example.com" && \
+    git config --global user.name "dev"
 
-COPY --from=api /usr/src/api /usr/src/api
-COPY --from=ui /usr/src/ui /usr/src/ui
+COPY --from=api /app ./api
+COPY --from=ui /app/dist ./ui/dist
 
-RUN addgroup --gid 9999 ohmyform && adduser -D --uid 9999 -G ohmyform ohmyform
-ENV SECRET_KEY=ChangeMe \
-    CREATE_ADMIN=FALSE \
-    ADMIN_EMAIL=admin@ohmyform.com \
-    ADMIN_USERNAME=root \
-    ADMIN_PASSWORD=root \
-    NODE_ENV=production
+RUN git init && git add -A && git commit -m "init" || true
+
+RUN mkdir -p /app/data
+
+ENV NODE_ENV=production
+ENV MONGODB_URI=mongodb://localhost:27017/ohmyform
 
 EXPOSE 3000
 
-RUN mkdir -p /run/nginx/
-RUN touch /usr/src/supervisord.log && chmod 777 /usr/src/supervisord.log
-COPY supervisord.conf /etc/supervisord.conf
-COPY nginx.conf /etc/nginx/nginx.conf
-
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
-# CMD [ "yarn", "start:prod" ]
+CMD ["node", "api/dist/main.js"]
